@@ -1,0 +1,238 @@
+// DeskMed — Phase 1 schema (Organization, User, RefreshToken, Patient, Appointment, AuditLog)
+// Source of truth: docs/superpowers/specs/2026-06-03-deskmed-initial-setup-design.md §6
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Organization {
+  id            String         @id @default(cuid())
+  name          String
+  slug          String         @unique
+  plan          String         @default("free")
+  createdAt     DateTime       @default(now())
+  users         User[]
+  patients      Patient[]
+  appointments  Appointment[]
+  auditLogs     AuditLog[]
+  prescriptions Prescription[]
+  invoices      Invoice[]
+  labOrders     LabOrder[]
+}
+
+model User {
+  id             String         @id @default(cuid())
+  organizationId String
+  organization   Organization   @relation(fields: [organizationId], references: [id])
+  name           String
+  email          String         @unique
+  passwordHash   String
+  role           Role           @default(RECEPTIONIST)
+  isActive       Boolean        @default(true)
+  createdAt      DateTime       @default(now())
+  refreshTokens  RefreshToken[]
+  appointments   Appointment[]  @relation("DoctorAppointments")
+  prescriptions  Prescription[] @relation("DoctorPrescriptions")
+  labOrders      LabOrder[]     @relation("DoctorLabOrders")
+}
+
+enum Role {
+  ADMIN
+  DOCTOR
+  RECEPTIONIST
+  LAB_TECHNICIAN
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+model Patient {
+  id             String        @id @default(cuid())
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id])
+  name           String
+  phone          String
+  email          String?
+  dob            DateTime?
+  gender         String?
+  bloodGroup     String?
+  address        String?
+  createdAt      DateTime       @default(now())
+  appointments   Appointment[]
+  prescriptions  Prescription[]
+  invoices       Invoice[]
+  labOrders      LabOrder[]
+}
+
+model Appointment {
+  id             String            @id @default(cuid())
+  organizationId String
+  organization   Organization      @relation(fields: [organizationId], references: [id])
+  patientId      String
+  patient        Patient           @relation(fields: [patientId], references: [id])
+  doctorId       String
+  doctor         User              @relation("DoctorAppointments", fields: [doctorId], references: [id])
+  slot           DateTime
+  status         AppointmentStatus @default(SCHEDULED)
+  type           String            @default("consultation")
+  notes          String?
+  createdAt      DateTime          @default(now())
+  prescriptions  Prescription[]
+  invoices       Invoice[]
+  labOrders      LabOrder[]
+}
+
+enum AppointmentStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+model AuditLog {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  userId         String
+  action         String
+  entity         String
+  entityId       String
+  metadata       Json?
+  createdAt      DateTime     @default(now())
+}
+
+model Prescription {
+  id             String             @id @default(cuid())
+  organizationId String
+  organization   Organization       @relation(fields: [organizationId], references: [id])
+  patientId      String
+  patient        Patient            @relation(fields: [patientId], references: [id])
+  doctorId       String
+  doctor         User               @relation("DoctorPrescriptions", fields: [doctorId], references: [id])
+  appointmentId  String?
+  appointment    Appointment?       @relation(fields: [appointmentId], references: [id])
+  diagnosis      String?
+  notes          String?
+  status         PrescriptionStatus @default(ACTIVE)
+  createdAt      DateTime           @default(now())
+  items          PrescriptionItem[]
+}
+
+model PrescriptionItem {
+  id             String       @id @default(cuid())
+  prescriptionId String
+  prescription   Prescription @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
+  drugName       String
+  dosage         String
+  frequency      String
+  duration       String
+  instructions   String?
+}
+
+enum PrescriptionStatus {
+  ACTIVE
+  CANCELLED
+}
+
+model Invoice {
+  id             String        @id @default(cuid())
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id])
+  patientId      String
+  patient        Patient       @relation(fields: [patientId], references: [id])
+  appointmentId  String?
+  appointment    Appointment?  @relation(fields: [appointmentId], references: [id])
+  status         InvoiceStatus @default(UNPAID)
+  notes          String?
+  total          Int
+  createdAt      DateTime      @default(now())
+  items          InvoiceItem[]
+  payments       Payment[]
+}
+
+model InvoiceItem {
+  id          String  @id @default(cuid())
+  invoiceId   String
+  invoice     Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  description String
+  quantity    Int
+  unitPrice   Int
+  amount      Int
+}
+
+model Payment {
+  id        String        @id @default(cuid())
+  invoiceId String
+  invoice   Invoice       @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  amount    Int
+  method    PaymentMethod
+  reference String?
+  paidAt    DateTime      @default(now())
+}
+
+enum InvoiceStatus {
+  UNPAID
+  PARTIAL
+  PAID
+  CANCELLED
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  UPI
+  BANK_TRANSFER
+  OTHER
+}
+
+model LabOrder {
+  id             String         @id @default(cuid())
+  organizationId String
+  organization   Organization   @relation(fields: [organizationId], references: [id])
+  patientId      String
+  patient        Patient        @relation(fields: [patientId], references: [id])
+  doctorId       String
+  doctor         User           @relation("DoctorLabOrders", fields: [doctorId], references: [id])
+  appointmentId  String?
+  appointment    Appointment?   @relation(fields: [appointmentId], references: [id])
+  status         LabOrderStatus @default(ORDERED)
+  notes          String?
+  createdAt      DateTime       @default(now())
+  tests          LabTest[]
+}
+
+model LabTest {
+  id             String         @id @default(cuid())
+  labOrderId     String
+  labOrder       LabOrder       @relation(fields: [labOrderId], references: [id], onDelete: Cascade)
+  name           String
+  resultValue    String?
+  unit           String?
+  referenceRange String?
+  flag           LabResultFlag?
+}
+
+enum LabOrderStatus {
+  ORDERED
+  COMPLETED
+  CANCELLED
+}
+
+enum LabResultFlag {
+  NORMAL
+  ABNORMAL
+  HIGH
+  LOW
+}
